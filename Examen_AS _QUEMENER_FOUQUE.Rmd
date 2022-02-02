@@ -1,0 +1,412 @@
+---
+title: "Examen_AS"
+author: "Thibault QUEMENER - Christine FOUQUE"
+date: "21/05/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Objectif du projet
+
+Dans le cadre de ce projet, nous travaillerons sur la base de données SwissLabor. Nous essaierons de construire plusieurs modèle afin de predire la variable binaire "Participation".
+
+
+## Télechargement des packages
+
+```{r pck, message=FALSE, warning=FALSE, paged.print=FALSE}
+library(readr)
+library(class)
+library(MASS)
+library(ggplot2)
+library(ROCR)
+library(GGally)
+library(caret)
+library(ISLR)
+library(rpart)
+library(rpart.plot)
+library(tidyverse)
+set.seed(1) 
+
+```
+
+## Importation des données
+
+```{r pressure, echo=FALSE, warning=FALSE}
+SwissLabor <- read_csv("C:/Users/thibq/Desktop/Utilitaire/Cnam/Datamining/Datamining 2/SwissLabor.csv")
+```
+
+## Description de la base de données
+ SwissLabor est une base de données qui comprend 872 observations et 7 variables.
++ participation : c’est une variable qualitative,  qui indique si l’individu participe ou non au marché du travail.
++ income : Logarithme du revenu hors travail ou du revenu
++ âge :  ge en décennies (années divisées par 10).
++ education : Années d'éducation
++ youngkids : Nombre de jeunes enfants de moins de 7 ans
++ oldkidsold : Nombre d'enfants plus âgés de plus de 7 ans
++ foreign : variable factorielle (yes, no). L'individu est-il un étranger (c'est-à-dire non suisse) ?
+
+
+
+## Préparation des données
+
+Nous préparons les données en supprimant la première colone du dataset. En effet, celle-ci contient seulement le numéro de ligne des individus. Cette information n'est donc pas utile pour notre analyse.
+Nous transformons les variables "Participation" et "Foreign" en données de type factor pour les traiter dans nos modèles.
+
+Après observations de la base nous voyons que celle-ci ne possède pas de valeurs NA. Nous n’avons pas d’identifiants uniques (numéro, ID...) pour s’assurer qu' il n’y ai pas de doublons. Nous partons donc de l'hypothèse selon laquelle il  n’y a pas de doublons dans cette base.
+
+
+```{r}
+SwissLabor<-SwissLabor[,-c(1)]
+SwissLabor$participation<-as.factor(SwissLabor$participation)
+SwissLabor$foreign<-as.factor(SwissLabor$foreign)
+```
+
+
+## Nettoyage des données
+
+Nos données étant propres, nous n'avons pas besoin d'effectuer des modifications afin de nettoyer celle-ci.
+
+
+## Statistiques Descriptives
+
+Nous réalisons brièvement quelques analyses de statistiques descriptive afin de nous appropier nos données.
+
+### Income
+
+```{r}
+par(mfrow = c(1, 3))
+h_income <-hist(SwissLabor$income)
+h_income
+p1 <- ggplot(SwissLabor) +
+  aes(x = "", y = income) +
+  geom_boxplot(fill = "#9ECAE1") +
+  theme_minimal()
+p1
+summary(SwissLabor$income)
+```
+
+Les revenus sont sous forme de logarithme pour diminuer e'echelle et resserer la distribution.
+La moyenne est de 10.6 avec un ecart type de 0.412. On observe Un individu qui a un revenu bien inférieur aux autres :
+Il a un revenu de 7.19 alors que la moyenne est autour de 10.6. On voit nettement qu il est isolé sur l'histogramme et le boxplot. Hormis cet individu la distribution suit globalement une loi normale
+
+Il serait intéressant de se renseigner sur cet individu spécifiquement et
+d'essayer de réaliser une modélisation sans celui-ci car il peut avoir une influence notable.
+
+
+### Age
+```{r}
+h_age <-hist(SwissLabor$age)
+h_age
+p2 <- ggplot(SwissLabor) +
+  aes(x = "", y =age
+      ) +
+  geom_boxplot(fill = "#9ECAE1") +
+  theme_minimal()
+p2
+
+```
+La distribution de l'age suit globalement une loi Normale
+Nous n'observons pas d'outlier sur cette variable.Les ages sont dispersés entre 2 decades et 6.2 decades , la moyenne est de 4 decade et l'ecart type de 1.06 decade.
+
+
+### Participation
+
+```{r}
+p7<-ggplot(SwissLabor, aes(x = participation, fill = participation)) + geom_bar() +
+  scale_fill_brewer(type="qual", palette = 6)
+p7
+summary(SwissLabor$participation)
+```
+
+Sur les 876 individus on voit que 471 ne sont pas actifs, c’est à dire qu il ne participe pas 
+au marché du travail.Tandis que 401 personnes participent au marché du travail, soit un peu moins de la moitié.
+
+
+
+# Prédiction de notre variable
+
+Nous allons maintenant construire plusieurs modèles afin de prédire la variable "Participation" de notre dataset. Pour cela, nous nous appuierons sur l'ensemble des variables de notre dataset.
+
+## Regression Logistique
+
+Nous commencerons par diviser nos données en deux dataset. Un dataset d'apprentissage et un dataset de test. Nous construirons notre dataset d'apprentissage avec 70% des individus de notre base SwissLabor. Nous conserverons les 30% restant dans un dataset de test afin d'évaluer la performance de notre modèle.
+
+```{r}
+
+Default_split<- sample(1:nrow(SwissLabor), round(nrow(SwissLabor)*0.7))
+glm.train <- SwissLabor[Default_split, ]
+glm.test  <- SwissLabor[-Default_split, ]
+```
+
+
+Nous commencerons par construire une regression logisitique prennant en compte l'ensemble des variables de notre jeu de données. Nous cherchons à predire une variable binomiale donc nous sélectionnons l'argument "binomial" pour le paramètre family. 
+
+```{r}
+full.model <- glm(participation~. , data = glm.train,family = "binomial")
+summary(full.model)
+```
+Dans ce modèle, nous remarquons que certaines variables ne sont pas significatives, nous chercherons un nouveau modèle plus optimisé. Pour cela nous réaliserons une selection des variables en mode stepWise. Par cette méthode, nous chercherons à minimiser notre AIC.
+
+```{r echo=TRUE}
+step.model<- stepAIC(full.model,direction = "both",trace=T)
+```
+
+Nous remarquons, que notre AIC converge vers. Nous selectionnons le modèle suivant qui présente l'AIC la plus basse.
+
+```{r}
+summary(step.model)
+```
+La performance entre notre modèle optimale et notre modèle complet est proche. Nous remarquons que l'AIC de notre modèle optimale est légèrement inférieure à celle de notre modèle complet. En revanche, la somme de la deviance residuel est légèrement supérieure dans notre modèle optimisé, notre modèle est donc légèrement moins performant sur ce point.
+Nous ferons néanmoins le choix de conserver notre modèle optimisé celui-ci offre une meilleure AIc et contient moins de variables.
+
+
+Nous testons les performances de notre dataset à l'aide de notre second jeu de données de test.
+
+```{r}
+
+glm.test$glm_predict<-predict(step.model,newdata=glm.test,type="response")
+glm.test$glm033<-ifelse(glm.test$glm_predict>0.33,"yes","no")
+cm<-table(predicted=glm.test$glm033, actual=glm.test$participation)
+
+
+cm<-confusionMatrix(cm,positive = "yes")
+cm
+```
+Nous obtennons une précision proche de 60%, avec une sensibilité proche de 85% et une specificité voisine de 35%.
+Nous tenterons d'augmenter ce seuil, en convertissant les individus dont la probabilité prédite est supérieur à 0.66. Cette valeeur semble être la valeur nous garantissant les meilleurs résultats.
+
+
+```{r}
+glm.test$glm_predict<-predict(step.model,newdata=glm.test,type="response")
+glm.test$glm033<-ifelse(glm.test$glm_predict>0.66,"yes","no")
+cm<-table(predicted=glm.test$glm033, actual=glm.test$participation)
+
+
+cm<-confusionMatrix(cm,positive = "yes")
+cm
+```
+
+Ainsi, en selectionnant un seuil à 0.66, nous obtennons une précision de 69%, avec une sensibilité de 34% et une specificité de 93%.
+
+
+En conclusion, notre modèle de regression logistique optimale, nous explique que la variable "Participation" depend du salaire, de l'age du nombre d'enfant de moins de 7 ans et de la nationalité. Selon notre modèle lorsque nous augmentons l'age des répondants de 1, la probabilité de "Participation" diminue de 0.6.
+De plus les personnes étrangères ont une probalité de 3 de participer.
+
+```{r}
+exp(coef(step.model))
+```
+```{r}
+ggcoef_model(step.model, exponentiate = TRUE)
+```
+
+
+## KNN
+
+Nous réaliserons maintenant un second modèle sur l'algorithme de classification des K-plus proches voisins.
+Pour cela, comme pour la régression logistique, nous allons creer deux jeux d'apprentissage et de test. Afin de gagner en robustesse sur nos données , nous standardisons les variables numeriques.
+
+
+```{r}
+SwissLabor$participation<-ifelse(SwissLabor$participation == "yes", 1,0)
+SwissLabor$foreign<-ifelse(SwissLabor$foreign == "yes", 1,0)
+```
+
+
+```{r}
+#standardisation des variables
+deflt_s<-SwissLabor[-c(1,7)]
+deflt_s<-as.data.frame(scale(deflt_s))
+deflt_s$pred<-SwissLabor$participation
+
+#data splitting #
+Default_split<- sample(1:nrow(deflt_s), round(nrow(deflt_s)*0.7))
+deflt_train <- deflt_s[Default_split, ]
+deflt_test  <- deflt_s[-Default_split, ]
+##D?f matrice des var explicatives et de la variable r?ponse 
+train.x=deflt_train[,-6]
+test.x=deflt_test[,-6]
+train.y=deflt_train[,6]
+test.y=deflt_test[,6]
+
+```
+
+Avec l'algorithme KNN, nous devons separer notre variable cible de nos variables explicatives c'est pour cela que nous séparons nos données en 4.
+
+Une fois nos données préparées, nous lançons notre algortihme KNN avec K=1. Nous modifierons cette valeur en trouvant la valeur de K permettant d'optimiser notre modèle.
+
+
+```{r}
+set.seed(1) 
+knn_pred_y = knn(train.x, test.x, cl=train.y, k = 1) 
+table(knn_pred_y, test.y)
+#erreur de classification pour k=1
+mean(knn_pred_y != test.y)
+##erreur de pr?diction pour diff?rentes valeurs de k
+knn_pred_y = NULL 
+error_rate = NULL
+for(i in 1:50) { 
+  set.seed(1) 
+  knn_pred_y = knn(train.x, test.x, train.y,k=i)
+  error_rate[i] = mean(knn_pred_y != test.y)
+}
+### Trouver l'erreur la plus faible 
+min_error_rate = min(error_rate) 
+print(min_error_rate)
+
+```
+
+On cherche a definir le K permettant d'obtenir les meilleurs resultats pour notre modele.
+
+```{r}
+### k correspondant ? l'erreur la plus faible
+K = which(error_rate == min_error_rate)
+print(K)
+library(ggplot2) 
+qplot(1:50, error_rate, 
+      xlab = "K", 
+      ylab = "Error Rate", 
+      geom=c("line"))
+
+
+```
+
+Nous réalisons donc notre modèle KNN avec comme paramètre K=32. Nous definissons également les probabilités de nos prédictions.
+
+```{r}
+knn_pred_y = knn(train.x, test.x, train.y, k = K[1]) 
+table(knn_pred_y, test.y)
+
+
+prob_knn <-function(Xtrain, Xtest, Ytrain, k){
+  #proba à posteriori d'être dans la classe 1 : P(Y=1/X=x)
+  prob <-rep(NA,nrow(Xtest))
+  res <-knn(Xtrain, Xtest, Ytrain, k=k, prob=TRUE)
+  prob[res==1] <-attr(res,"prob")[res==1]
+  prob[res==0] <- 1-attr(res,"prob")[res==0]
+  return(prob)}
+
+
+score<-prob_knn(train.x, test.x, train.y, k = K[1])
+
+```
+
+
+```{r}
+
+```
+
+
+
+
+
+## Arbre de decision (Rpart)
+
+Nous essayons en créant un arbre de classification Rpart. Nous reprennons les deux dataset de notre modèle logistique.
+
+```{r}
+tree.train<-glm.train
+tree.test<-glm.test[-c(8:9)]
+
+```
+
+Nous developpons un premier arbre de decision complet. 
+
+```{r}
+Default.Tree <- rpart(participation~.,data=tree.train,method="class", control=rpart.control(minsplit=5,cp=0))
+
+
+#Affichage du résultat
+plot(Default.Tree, uniform=TRUE, branch=0.5, margin=0.1)
+text(Default.Tree, all=FALSE, use.n=TRUE)
+```
+Nous cherchons à trouver le nombre de profondeur optimal pour notre arbre, pour cela nous cherchon le niveau de cp qui minimise l'erreur relative de notre arbre.
+
+```{r}
+plotcp(Default.Tree)
+```
+Nous remarquons que notre niveau erreur est minimale lorsque notre cp est de 7. Nous élaguerons donc notre arbre pour obtenir ce niveau de profondeur.
+
+```{r}
+Default.Tree_Opt<-prune(Default.Tree,cp=Default.Tree$cptable[which.min(Default.Tree$cptable[,4]),1])
+
+#Représentation graphique de l’arbre optimal
+prp(Default.Tree_Opt,extra=1)
+```
+
+Nous remarquons qu'avec notre arbre, ce sont les variables foreign, income, age et youngkid qui permettent de classer nos individus dans dans les catégories de participation.
+
+Nous verifions maintenant la performance de notre modèle à l'aide d'une matrice de confusion.
+
+```{r}
+#Prédiction du modèle sur les données de test
+tree.test$tree_predict<-predict(Default.Tree_Opt,newdata=tree.test, type="class")
+tree_prob<-as.data.frame(predict(Default.Tree_Opt,newdata=tree.test, type="prob"))
+
+#Matrice de confusion
+mc<-table(tree.test$participation,tree.test$tree_predict)
+print(mc)
+
+
+#Erreur de classement
+erreur.classement<-1.0-(mc[1,1]+mc[2,2])/sum(mc)
+print("Erreur de classement")
+print(erreur.classement*100)
+
+
+#Taux de prédiction
+print("Taux de prediction")
+prediction=mc[2,2]/sum(mc[2,])
+print(prediction*100)
+
+```
+
+Notre arbre de classification est donc capable de prédire la variable participation avec un taux de reussite proche de 65%.
+
+
+
+# Evaluation du meilleure modèle
+
+Afin de choisir le meilleur modèle entre notre regression logistique et notre arbre de classification, nous realiserons des courbes ROC afin de mesurer l'AUC de nos modèle et determiner qui est le meilleur.
+
+## Courbe ROC
+
+```{r}
+par(mfrow = c(2, 2))
+pred=prediction(glm.test$glm_predict,glm.test$participation)
+perf<-performance(pred,"auc")
+#Resultat de l'AUC
+perf@y.values-> LOGIT_AUC
+LOGIT_AUC<-round(as.numeric(LOGIT_AUC),2)
+perf=performance(pred,"tpr","fpr")
+ROC_logit<-plot(perf,main="Courbe ROC LOGIT",sub=LOGIT_AUC)
+ROC_logit
+
+colnames(tree_prob)[2]<-"Yes"
+pred=prediction(tree_prob$Yes,tree.test$participation)
+
+perf<-performance(pred,"auc")
+#Resultat de l'AUC
+perf@y.values-> TREE_AUC
+TREE_AUC<-round(as.numeric(TREE_AUC),2)
+perf=performance(pred,"tpr","fpr")
+ROC_Tree<-plot(perf,main="Courbe ROC TREE",sub=TREE_AUC)
+ROC_Tree
+
+pred=prediction(score,test.y)
+
+perf<-performance(pred,"auc")
+#Resultat de l'AUC
+perf@y.values-> KNN_AUC
+KNN_AUC<-round(as.numeric(KNN_AUC),2)
+perf=performance(pred,"tpr","fpr")
+ROC_KNN<-plot(perf,main="Courbe ROC KNN",sub=KNN_AUC)
+ROC_KNN
+
+
+
+```
+Nous en deduisons, que l'AUC sour la courbe ROC de notre KNN est supérieure à celle de notre arbre de classification et celle de notre logit. Ainsi, nous en deduisons que notre KNN est donc notre meilleur modèle et celui à choisir.
+
